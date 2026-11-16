@@ -69,8 +69,23 @@ Click or tap the screen to boop. `Space` boops, `S` shakes. On a phone,
 OLED VCC → 3V3        OLED GND → GND
 OLED SDA → GPIO8      OLED SCL → GPIO9
 Button   → GPIO4 → GND (INPUT_PULLUP)
-Battery + → TP4056 B+ ; OUT+ → ESP32 5V/3V3 ; battery − → B−/GND
+MPU6050  VCC → 3V3    GND → GND    SDA → GPIO8    SCL → GPIO9   (address 0x68)
+Battery divider: cell + → 100k → GPIO1 → 100k → GND   (do not exceed 3.3V on the pin)
+
+Power:
+  Battery + → TP4056 B+      Battery − → TP4056 B−
+  TP4056 OUT+ → ESP32 5V pin (NOT the 3V3 pin)
+  TP4056 OUT− → GND
 ```
+
+**Why OUT+ goes to 5V and never to 3V3:** these boards regulate 5V down through
+an AMS1117-class LDO, and a 3.7–4.2V cell can't drive that regulator with enough
+headroom (dropout ≈1.1V), so the 3V3 rail sags to roughly 2.6–3.1V as the cell
+drains. The OLED still runs, but it dims and may brown-out below ~3.8V cell. Two
+honest options: accept ~60% of the cell's capacity, or add an MT3608 boost
+converter set to 5.0V. Connecting OUT+ to the 3V3 pin *while USB is plugged in*
+backfeeds the regulator — don't.
+
 
 ## Flashing
 

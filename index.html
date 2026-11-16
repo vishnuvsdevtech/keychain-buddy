@@ -89,10 +89,20 @@
     </table>
 
     <h2>Wiring</h2>
-    <pre class="mono">OLED  VCC → 3V3        OLED  GND → GND
-OLED  SDA → GPIO8      OLED  SCL → GPIO9
-Battery +  → TP4056 B+ → TP4056 OUT+ → ESP32 5V/3V3 pad
-Battery −  → TP4056 B− → TP4056 OUT− → GND</pre>
+    <pre class="mono">OLED    VCC → 3V3     OLED  GND → GND
+OLED    SDA → GPIO8   OLED  SCL → GPIO9
+Button      → GPIO4 → GND (INPUT_PULLUP)
+MPU6050 VCC → 3V3     GND → GND   SDA → GPIO8   SCL → GPIO9
+Divider: cell + → 100k → GPIO1 → 100k → GND
+
+Battery +  → TP4056 B+     Battery − → TP4056 B−
+TP4056 OUT+ → ESP32 <b>5V</b> pin        (never the 3V3 pin)
+TP4056 OUT− → GND</pre>
+    <p class="fine mono">
+      OUT+ to 5V, not 3V3: the on-board AMS1117 needs ~1.1V headroom, so a 3.7–4.2V cell
+      gives a sagging 2.6–3.1V rail. Fine for the OLED, dims below ~3.8V. Feed 3V3 directly
+      only with USB unplugged, or add an MT3608 boost.
+    </p>
 
     <h2>Firmware</h2>
     <p>

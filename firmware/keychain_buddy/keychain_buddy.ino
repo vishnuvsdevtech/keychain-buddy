@@ -18,8 +18,11 @@
  */
 
 #include <Wire.h>
+#include <math.h>
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
+#include "esp_sleep.h"
+#include "driver/gpio.h"
 
 #define SCREEN_W 128
 #define SCREEN_H 64
@@ -28,6 +31,14 @@
 #define BTN_PIN  4
 
 Adafruit_SSD1306 display(SCREEN_W, SCREEN_H, &Wire, -1);
+
+// ---- optional hardware, probed at boot ----------------------------------
+#define BATT_PIN   1        // ADC tap between two 100k resistors
+#define BATT_DIV   2.0f     // 100k/100k divider halves the cell voltage
+#define MPU_ADDR   0x68
+static bool  hasMpu   = false;
+static float lastMag  = 0;
+static uint32_t accelShakes = 0;
 
 // ---- geometry, identical to the simulator --------------------------------
 static const int EYE_W = 17, EYE_H = 19, EYE_Y = 15;
@@ -44,6 +55,8 @@ static int8_t   glance    = 0;
 static int8_t   offsetX   = 0;
 static uint8_t  zphase    = 0;
 static uint16_t boops     = 0;
+static uint8_t  batPct    = 100;
+static uint32_t nextBatt  = 0;
 
 static const uint32_t BLINK_MS  = 130;
 static const uint32_t HAPPY_MS  = 900;
@@ -128,6 +141,74 @@ void drawHeart(int x, int y) {
   display.drawPixel(x + 3, y + 5, SSD1306_WHITE);
 }
 
+// ---- battery, MPU6050 ----------------------------------------------------
+// Cell voltage through a 100k/100k divider on BATT_PIN. analogReadMilliVolts
+// uses the calibrated reference, so no manual ADC maths.
+float batteryVolts() {
+  uint32_t mv = 0;
+  for (int i = 0; i < 8; i++) mv += analogReadMilliVolts(BATT_PIN);  // average
+  return (mv / 8.0f) * BATT_DIV / 1000.0f;
+}
+
+// 3.3V = empty-ish, 4.2V = full. Clamped so the bar never disappears.
+uint8_t batteryPercent() {
+  float v = batteryVolts();
+  float pct = (v - 3.3f) / (4.2f - 3.3f) * 100.0f;
+  if (pct < 0) pct = 0;
+  if (pct > 100) pct = 100;
+  return (uint8_t)pct;
+}
+
+void drawBattery(uint8_t pct) {
+  uint8_t bars = (pct + 24) / 25;          // 0..4, same rounding as the POC
+  if (bars > 4) bars = 4;
+  for (int i = 0; i < 4; i++) {
+    if (i < bars) display.fillRect(108 + i * 4, 58, 3, 4, SSD1306_WHITE);
+  }
+  display.fillRect(107, 57, 1, 6, SSD1306_WHITE);
+  display.fillRect(124, 58, 1, 4, SSD1306_WHITE);
+}
+
+bool mpuBegin() {
+  Wire.beginTransmission(MPU_ADDR);
+  Wire.write(0x75);                        // WHO_AM_I
+  if (Wire.endTransmission(false) != 0) return false;
+  if (Wire.requestFrom((uint8_t)MPU_ADDR, (uint8_t)1) != 1) return false;
+  if (Wire.read() != 0x68) return false;
+  Wire.beginTransmission(MPU_ADDR);
+  Wire.write(0x6B); Wire.write(0x00);      // PWR_MGMT_1: wake
+  Wire.endTransmission();
+  Wire.beginTransmission(MPU_ADDR);
+  Wire.write(0x1C); Wire.write(0x00);      // ACCEL_CONFIG: +/-2g
+  Wire.endTransmission();
+  return true;
+}
+
+// Returns the acceleration magnitude in g, or -1 when no sensor is present.
+float accelMagnitude() {
+  if (!hasMpu) return -1;
+  Wire.beginTransmission(MPU_ADDR);
+  Wire.write(0x3B);                        // ACCEL_XOUT_H
+  if (Wire.endTransmission(false) != 0) return -1;
+  if (Wire.requestFrom((uint8_t)MPU_ADDR, (uint8_t)6) != 6) return -1;
+  int16_t ax = (Wire.read() << 8) | Wire.read();
+  int16_t ay = (Wire.read() << 8) | Wire.read();
+  int16_t az = (Wire.read() << 8) | Wire.read();
+  const float scale = 16384.0f;            // LSB per g at +/-2g
+  return sqrtf((ax * ax + ay * ay + az * az)) / scale;
+}
+
+void pollShake() {
+  float mag = accelMagnitude();
+  if (mag < 0) return;
+  // A quick jolt shows up as a large frame-to-frame change, not as raw magnitude.
+  if (lastMag > 0 && fabsf(mag - lastMag) > 0.9f && mode != DIZZY) {
+    accelShakes++;
+    setMode(DIZZY);
+  }
+  lastMag = mag;
+}
+
 void render() {
   display.clearDisplay();
   int ox = offsetX;
@@ -147,6 +228,7 @@ void render() {
     drawMouth(mode);
     if (mode == HAPPY) drawHeart(100, 12);
   }
+  drawBattery(batPct);
   display.display();
 }
 
@@ -180,6 +262,13 @@ void tick() {
     if (millis() - idleSince > SLEEP_AFTER) setMode(SLEEP);
   }
 
+  // battery: sampling every frame would mean an ADC read + float maths per
+  // frame for a value that moves over hours
+  if (now - nextBatt > 10000) {
+    batPct = batteryPercent();
+    nextBatt = now;
+  }
+
   // dizzy wobble
   offsetX = (mode == DIZZY) ? (int8_t)(sin(inMode / 60.0) * 3) : 0;
 
@@ -189,6 +278,12 @@ void tick() {
       display.clearDisplay();
       display.display();
       display.ssd1306_command(SSD1306_DISPLAYOFF);
+
+      // Without a wake source the chip sleeps forever and only a power cycle
+      // brings it back. GPIO4 is RTC-capable on the C3; LOW = button pressed.
+      gpio_pullup_en((gpio_num_t)BTN_PIN);
+      gpio_pulldown_dis((gpio_num_t)BTN_PIN);
+      esp_deep_sleep_enable_gpio_wakeup(1ULL << BTN_PIN, ESP_GPIO_WAKEUP_GPIO_LOW);
       esp_deep_sleep_start();
     }
   }
@@ -198,6 +293,10 @@ void setup() {
   Serial.begin(115200);
   pinMode(BTN_PIN, INPUT_PULLUP);
 
+  // battery divider tap
+  analogReadResolution(12);
+  analogSetPinAttenuation(BATT_PIN, ADC_11db);   // full 0–3.3V range
+
   Wire.begin(SDA_PIN, SCL_PIN);
   if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) {
     Serial.println("SSD1306 not found");
@@ -205,6 +304,12 @@ void setup() {
   }
   display.setRotation(0);
   display.dim(false);
+
+  hasMpu = mpuBegin();
+  Serial.printf("MPU6050: %s\n", hasMpu ? "found" : "not found");
+  batPct = batteryPercent();
+  nextBatt = millis();
+
   randomSeed(esp_random());
   setMode(IDLE);
   idleSince = millis();
@@ -213,6 +318,7 @@ void setup() {
 
 void loop() {
   static bool lastBtn = HIGH;
+  static uint32_t lastPoll = 0;
 
   bool btn = digitalRead(BTN_PIN);
   if (btn == LOW && lastBtn == HIGH) {     // press edge, debounce by frame
@@ -220,6 +326,13 @@ void loop() {
     if (digitalRead(BTN_PIN) == LOW) boop();
   }
   lastBtn = btn;
+
+  // 120 ms is fast enough to catch a jolt and cheap enough to leave the
+  // display alone; polling per frame would double the I2C traffic.
+  if (millis() - lastPoll > 120) {
+    pollShake();
+    lastPoll = millis();
+  }
 
   tick();
   render();
