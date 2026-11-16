@@ -159,5 +159,34 @@
     return fb;
   }
 
-  root.KB = { W, H, FrameBuffer, EYE, renderFace };
+  /** Nearest-neighbour blit with integer scale — the same operation an e-paper
+   *  driver does when the source art is smaller than the panel. */
+  function blitScaled(dst, src, scale, ox, oy) {
+    for (let y = 0; y < src.h; y++) {
+      for (let x = 0; x < src.w; x++) {
+        const v = src.buf[y * src.w + x];
+        if (!v) continue;
+        const dx = ox + x * scale, dy = oy + y * scale;
+        for (let j = 0; j < scale; j++) {
+          for (let i = 0; i < scale; i++) dst.px(dx + i, dy + j, 1);
+        }
+      }
+    }
+    return dst;
+  }
+
+  /** Render at a larger panel size: draws into the native 128x64 face buffer,
+   *  then blits scaled and centred. Keeps one set of geometry constants. */
+  function composeFace(dst, s, opts = {}) {
+    const scale = Math.max(1, Math.floor(opts.scale || 1));
+    const small = new FrameBuffer(128, 64);
+    renderFace(small, s);
+    const ox = opts.ox != null ? opts.ox
+      : Math.floor((dst.w - small.w * scale) / 2);
+    const oy = opts.oy != null ? opts.oy
+      : Math.floor((dst.h - small.h * scale) / 2);
+    return blitScaled(dst, small, scale, ox, oy);
+  }
+
+  root.KB = { W, H, FrameBuffer, EYE, renderFace, composeFace, blitScaled };
 })(typeof globalThis !== 'undefined' ? globalThis : this);
