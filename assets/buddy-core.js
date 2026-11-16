@@ -86,8 +86,13 @@
   function mouth(fb, mode) {
     const y = 44;
     if (mode === 'happy') {
-      fb.roundRect(55, y, 18, 12, 6, 1);   // solid block
-      fb.fillRect(57, y + 3, 14, 8, 0);    // hollow out -> U-shaped smile
+      // A parabola, not a hollowed rounded rect. The old ring read fine at
+      // 0.96" but turned into a featureless box once blitted at 2x for e-paper.
+      for (let i = 0; i <= 16; i++) {
+        const t = (i - 8) / 8;                    // -1 at the ends, 0 mid
+        const yy = y + Math.round(3 * (1 - t * t));
+        fb.fillRect(55 + i, yy, 1, 2, 1);
+      }
     } else if (mode === 'dizzy') {
       for (let i = 0; i < 14; i++) {
         const yy = y + (i % 4 < 2 ? 0 : 2);
