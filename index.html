@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Keychain Buddy — POC</title>
+<meta name="description" content="A 128x64 pixel pet for an ESP32 keychain. Browser simulator of the firmware behaviour.">
+<meta name="theme-color" content="#0b0b0a">
+<link rel="canonical" href="https://vishnuvsdevtech.github.io/keychain-buddy/">
+<meta property="og:title" content="Keychain Buddy — 128×64 pixel pet">
+<meta property="og:description" content="A monochrome pixel companion for an ESP32 + OLED keychain. Browser simulator, real firmware logic.">
+<meta property="og:type" content="website">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+
+<header class="top">
+  <div class="brand">
+    <span class="dot" aria-hidden="true"></span>
+    <strong>KEYCHAIN BUDDY</strong>
+    <span class="tag mono">POC · SSD1306 128×64</span>
+  </div>
+  <a class="gh mono" href="#build">build notes ↓</a>
+</header>
+
+<main>
+  <section class="stage">
+
+    <div class="device" id="device">
+      <div class="ring" aria-hidden="true"></div>
+      <div class="shell">
+        <div class="bezel">
+          <canvas id="screen" width="128" height="64" aria-label="Simulated OLED screen showing the pixel pet"></canvas>
+          <div class="glass" aria-hidden="true"></div>
+        </div>
+        <div class="under mono">
+          <span>KB-01</span>
+          <span id="led" class="led" aria-hidden="true"></span>
+          <span>ESP32-C3</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="controls">
+      <p class="hint">
+        Click or tap the screen to <b>boop</b> it. Shake your phone, or use the buttons —
+        the firmware reacts to both.
+      </p>
+
+      <div class="btns">
+        <button id="boop" class="btn solid">Boop</button>
+        <button id="shake" class="btn">Shake</button>
+        <button id="wake" class="btn">Wake / Sleep</button>
+        <button id="motion" class="btn ghost">Enable real shake</button>
+      </div>
+
+      <dl class="readout mono">
+        <div><dt>state</dt><dd id="st-state">idle</dd></div>
+        <div><dt>fps</dt><dd id="st-fps">—</dd></div>
+        <div><dt>uptime</dt><dd id="st-up">0s</dd></div>
+        <div><dt>boops</dt><dd id="st-boops">0</dd></div>
+        <div><dt>battery</dt><dd id="st-bat">100%</dd></div>
+      </dl>
+
+      <div class="log mono" id="log" aria-live="polite"></div>
+    </div>
+  </section>
+
+  <section id="build" class="build">
+    <h2>What this is</h2>
+    <p>
+      A browser twin of the firmware in <code>firmware/</code>. Both draw into a
+      1-bit 128×64 framebuffer — the same memory an SSD1306 OLED exposes — so what
+      you tune here is what the device shows. The point is to settle the face
+      design and the reaction timings <em>before</em> buying parts.
+    </p>
+
+    <h2>Bill of materials</h2>
+    <table>
+      <tr><th>Part</th><th>Note</th><th>₹</th></tr>
+      <tr><td>ESP32-C3 SuperMini</td><td>or ESP32-S3 for headroom</td><td>450–900</td></tr>
+      <tr><td>0.96" I2C OLED, SSD1306</td><td>128×64, 4-pin</td><td>200–350</td></tr>
+      <tr><td>LiPo 3.7V 150–300 mAh</td><td>slim cell fits the shell</td><td>250–400</td></tr>
+      <tr><td>TP4056 charge module</td><td>with protection</td><td>80–150</td></tr>
+      <tr><td>Slide switch + wire</td><td>hard power cut</td><td>60</td></tr>
+      <tr><td>3D-printed shell</td><td>PETG, 0.4 nozzle</td><td>0–200</td></tr>
+      <tr class="total"><td colspan="2">Total</td><td>1,040–2,060</td></tr>
+    </table>
+
+    <h2>Wiring</h2>
+    <pre class="mono">OLED  VCC → 3V3        OLED  GND → GND
+OLED  SDA → GPIO8      OLED  SCL → GPIO9
+Battery +  → TP4056 B+ → TP4056 OUT+ → ESP32 5V/3V3 pad
+Battery −  → TP4056 B− → TP4056 OUT− → GND</pre>
+
+    <h2>Firmware</h2>
+    <p>
+      <code>firmware/keychain_buddy/keychain_buddy.ino</code> — Arduino/ESP32.
+      Same state machine as this page: <code>idle → blink → happy | dizzy | sleep</code>,
+      driven by a tap on the screen button and by an MPU6050 (or the ESP32's own
+      accelerometer on S3 variants). Libraries: <code>Adafruit_SSD1306</code>,
+      <code>Adafruit_GFX</code>.
+    </p>
+    <p class="fine mono">
+      No hardware yet — this page is the simulator, and the sketch compiles against the
+      same constants. Flash it when the parts arrive.
+    </p>
+  </section>
+</main>
+
+<footer class="foot mono">
+  <span>Keychain Buddy · proof of concept</span>
+  <span>framebuffer 1-bit · 8192 bytes</span>
+</footer>
+
+<script src="assets/buddy-core.js"></script>
+<script src="assets/buddy.js"></script>
+</body>
+</html>
